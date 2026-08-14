@@ -301,6 +301,36 @@ sudo apt-get install -y -qq \
 echo "  ✓ Aplicaciones instaladas (o ya existentes)."
 echo ""
 
+# --- 5b. AppArmor (opcional) ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  PASO 5b/6 — AppArmor (opcional)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+if command -v aa-status &>/dev/null; then
+  echo "  AppArmor detectado en el sistema."
+  if [ -f "$SCRIPT_DIR/apparmor/usr.local.bin.yap" ]; then
+    echo "  Instalando perfil de Yap..."
+    sudo cp "$SCRIPT_DIR/apparmor/usr.local.bin.yap" /etc/apparmor.d/
+    sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.yap 2>/dev/null && \
+      echo "  ✓ Perfil AppArmor de Yap cargado en modo enforce." || \
+      echo "  [AVISO] No se pudo cargar el perfil. Revisa con 'yap --apparmor-status'."
+  else
+    echo "  [AVISO] No se encontró el perfil AppArmor en el repositorio."
+  fi
+else
+  echo "  AppArmor no está instalado. Instalando..."
+  sudo apt-get install -y -qq apparmor apparmor-utils --no-install-recommends 2>/dev/null && {
+    if [ -f "$SCRIPT_DIR/apparmor/usr.local.bin.yap" ]; then
+      sudo cp "$SCRIPT_DIR/apparmor/usr.local.bin.yap" /etc/apparmor.d/
+      sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.yap 2>/dev/null && \
+        echo "  ✓ Perfil AppArmor de Yap cargado en modo enforce." || \
+        echo "  [AVISO] No se pudo cargar el perfil. Revisa con 'yap --apparmor-status'."
+    fi
+  } || echo "  [AVISO] No se pudo instalar AppArmor. Yap funcionará sin confinement."
+fi
+echo ""
+
 # --- 6. Verificación ---
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  PASO 6/6 — Verificación de la instalación"
@@ -341,6 +371,8 @@ printf "  | %-20s | %-30s |\n" "yap (comando)"  "$YAP_OK"
 printf "  | %-20s | %-30s |\n" "notify-send"   "$NOTIFY_OK"
 printf "  | %-20s | %-30s |\n" "Whitelist apps" "$APPS_OK"
 printf "  | %-20s | %-30s |\n" "Whitelist web"  "$WEB_OK"
+APPARMOR_OK=$(aa-status 2>/dev/null | grep -q "yap" && echo "ACTIVO" || echo "NO INSTALADO")
+printf "  | %-20s | %-30s |\n" "AppArmor"       "$APPARMOR_OK"
 echo "  +----------------------+--------------------------------+"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

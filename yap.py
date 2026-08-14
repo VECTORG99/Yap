@@ -419,6 +419,100 @@ def notify(title, msg, urgency="normal"):
         pass
 
 
+# ── AppArmor integration (#14) ──────────────────────────────
+
+APPARMOR_PROFILE = "usr.local.bin.yap"
+APPARMOR_PROFILE_PATH = f"/etc/apparmor.d/{APPARMOR_PROFILE}"
+
+
+def apparmor_status():
+    """Check AppArmor status for Yap.
+
+    Returns a dict with:
+      - installed: whether AppArmor is available on the system
+      - profile_loaded: whether the Yap profile is loaded
+      - mode: "enforce", "complain", or None
+    """
+    status = {"installed": False, "profile_loaded": False, "mode": None}
+
+    # Check if AppArmor is available
+    if not os.path.isdir("/sys/kernel/security/apparmor"):
+        return status
+    status["installed"] = True
+
+    # Check if the Yap profile is loaded
+    try:
+        result = subprocess.run(
+            ["aa-status", "--json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            profiles = data.get("profiles", {})
+            if APPARMOR_PROFILE in profiles:
+                status["profile_loaded"] = True
+                status["mode"] = profiles[APPARMOR_PROFILE]
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: check profiles file directly
+    if not status["profile_loaded"]:
+        try:
+            with open("/sys/kernel/security/apparmor/profiles") as f:
+                for line in f:
+                    if APPARMOR_PROFILE in line:
+                        status["profile_loaded"] = True
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            status["mode"] = parts[1]
+                        break
+        except (FileNotFoundError, OSError):
+            pass
+
+    return status
+
+
+def cmd_apparmor_status():
+    """Display AppArmor status for Yap in a user-friendly format."""
+    status = apparmor_status()
+
+    if not status["installed"]:
+        return display_box(
+            "AppArmor no está instalado en este sistema.\n"
+            "Instala con: sudo apt install apparmor apparmor-utils\n"
+            "El perfil de Yap no está activo.",
+            color="YELLOW"
+        )
+
+    if not status["profile_loaded"]:
+        return display_box(
+            "AppArmor está instalado pero el perfil de Yap no está cargado.\n"
+            "Instala el perfil con:\n"
+            "  sudo cp apparmor/usr.local.bin.yap /etc/apparmor.d/\n"
+            "  sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.yap",
+            color="YELLOW"
+        )
+
+    mode = status["mode"] or "unknown"
+    if mode == "enforce":
+        color = "GREEN"
+        desc = "Bloquea accesos no permitidos"
+    elif mode == "complain":
+        color = "YELLOW"
+        desc = "Solo loguea violaciones (no bloquea)"
+    else:
+        color = "GRAY"
+        desc = "Modo desconocido"
+
+    return display_box(
+        f"AppArmor: ACTIVO\n"
+        f"Perfil: {APPARMOR_PROFILE}\n"
+        f"Modo: {mode} — {desc}\n"
+        f"Ruta: {APPARMOR_PROFILE_PATH}",
+        color=color
+    )
+
+
 def cmd_open_app(app_name):
     apps = load_whitelist(WHITELIST_APPS)
     key = app_name.strip().lower()
@@ -776,6 +870,8 @@ def interpret(user_input):
         return "progreso", "progreso"
     if stripped in ("ayuda", "help", "--help", "-h", "comandos", "ayuda yap"):
         return "help", "ayuda"
+    if stripped in ("--apparmor-status", "apparmor-status", "apparmor status"):
+        return "apparmor_status", "status"
     if stripped in ("salir", "exit", "quit", "q"):
         sys.exit(0)
 
@@ -911,6 +1007,9 @@ def handle_action(action, param, original_input):
 
     elif action == "progreso":
         print(cmd_mostrar_progreso())
+
+    elif action == "apparmor_status":
+        print(cmd_apparmor_status())
 
     elif action == "help":
         print()
