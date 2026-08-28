@@ -11,6 +11,19 @@ sudo ./setup.sh
 
 Ver requisitos detallados en [README.md](README.md#61-requisitos-del-sistema).
 
+## Primer uso (Onboarding)
+
+Al ejecutar `yap` por primera vez tras la instalación, se presentará un tutorial interactivo de bienvenida ("onboarding"). Este tutorial explica brevemente:
+1. Qué es Yap y su propósito como asistente educativo.
+2. Ejemplos de uso (cómo solicitar aplicaciones o hacer preguntas).
+3. Cómo acceder a los cursos disponibles.
+
+El sistema solicitará tu nombre para personalizar las interacciones y guardará tu preferencia de inicio de sesión. Si en el futuro deseas volver a ver esta introducción inicial, puedes ejecutar:
+
+```bash
+yap --tutorial
+```
+
 ## Comandos basicos
 
 | Comando | Descripcion |

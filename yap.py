@@ -293,6 +293,7 @@ def listar_cursos():
 
 
 # ── Progreso del estudiante ─────────────────────────────────
+PROFILE_FILE = os.path.expanduser("~/.config/yap/profile.json")
 PROGRESS_FILE = os.path.expanduser("~/.config/yap/progress.json")
 
 # ── Historial persistente entre sesiones (#13) ──────────────
@@ -393,6 +394,64 @@ def cmd_historial(resume_last=False):
     lines.append(f"\n  {C['GRAY']}Para retomar la última sesión: yap historial --ultimo{C['RESET']}")
     lines.append(f"  {C['GRAY']}Historial guardado en: {HISTORY_FILE}{C['RESET']}")
     return "\n".join(lines)
+
+
+def cargar_perfil():
+    path = PROFILE_FILE
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+def guardar_perfil(perfil):
+    path = PROFILE_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(perfil, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+def run_onboarding():
+    sys.stdout.write(f"\n{C['CYAN']}=================================================={C['RESET']}\n")
+    sys.stdout.write(f"{C['GREEN']} ¡Bienvenido a Yap! Tu asistente y tutor personal {C['RESET']}\n")
+    sys.stdout.write(f"{C['CYAN']}=================================================={C['RESET']}\n\n")
+    
+    print(f"{C['YELLOW']}1. ¿Qué es Yap?{C['RESET']}")
+    print("Yap es tu entorno de aprendizaje interactivo desde la terminal.")
+    print("Puede ayudarte a abrir aplicaciones, buscar en internet o guiarte")
+    print("paso a paso en tus cursos de programación y tecnología.\n")
+    input(f"{C['GRAY']}[Presiona Enter para continuar]{C['RESET']}")
+    
+    print(f"\n{C['YELLOW']}2. ¿Cómo usarlo?{C['RESET']}")
+    print("Solo tienes que escribir lo que necesitas de forma natural. Por ejemplo:")
+    print("  > abre firefox")
+    print("  > busca historia de linux")
+    print("  > ayuda\n")
+    input(f"{C['GRAY']}[Presiona Enter para continuar]{C['RESET']}")
+    
+    print(f"\n{C['YELLOW']}3. ¿Qué puedo aprender?{C['RESET']}")
+    print("Yap incluye cursos interactivos donde avanzas haciendo actividades.")
+    print("Prueba escribir: 'curso' para ver la lista de cursos disponibles.\n")
+    input(f"{C['GRAY']}[Presiona Enter para continuar]{C['RESET']}")
+    
+    print(f"\n{C['YELLOW']}4. Para empezar, ¿cuál es tu nombre?{C['RESET']}")
+    nombre = input(f"{C['GREEN']}Nombre{C['RESET']} > ").strip()
+    if not nombre:
+        nombre = "Estudiante"
+        
+    perfil = {
+        "nombre": nombre,
+        "onboarding_completed": True,
+        "primer_uso": _now_iso()
+    }
+    guardar_perfil(perfil)
+    
+    print(f"\n¡Listo, {nombre}! Ya puedes empezar a explorar.")
+    print(f"Si alguna vez quieres volver a ver esto, escribe: {C['CYAN']}yap --tutorial{C['RESET']}\n")
+    return perfil
 
 def cargar_progreso():
     """Load student progress. Returns default empty dict if no file."""
@@ -1064,12 +1123,12 @@ def interpret(user_input):
     stripped = user_input.strip().lower()
 
     # Exact/prefix keyword routing (bypasses LLM for speed & reliability)
-    if stripped in ("guia", "guia rapida", "tutorial", "como usar"):
+    if stripped in ("guia", "guia rapida", "tutorial", "como usar", "--tutorial"):
         return "guia", "guia"
     if stripped in ("progreso", "avance", "mi progreso", "mi avance", "avance curso"):
         return "progreso", "progreso"
-    if stripped == "historial" or stripped == "historial --ultimo":
-        if "--ultimo" in stripped:
+    if stripped in ("historial", "historial --ultimo", "retomar"):
+        if "--ultimo" in stripped or stripped == "retomar":
             return "historial", "--ultimo"
         return "historial", "historial"
     if stripped in ("ayuda", "help", "--help", "-h", "comandos", "ayuda yap"):
@@ -1113,6 +1172,47 @@ def main():
         # Guardar historial de conversación al cerrar (#13)
         atexit.register(_save_history_session)
 
+        perfil = cargar_perfil()
+        if not perfil:
+            perfil = run_onboarding()
+        else:
+            nombre = perfil.get('nombre', 'Estudiante')
+            
+            resumen_progreso = "Sin cursos iniciados."
+            progreso = cargar_progreso().get("cursos", {})
+            if progreso:
+                for curso, eas in progreso.items():
+                    for ea_id, data in eas.items():
+                        if not data.get("completada", False):
+                            act = data.get("actividad_actual", 1)
+                            total = data.get("total_actividades", 5) # Default 5
+                            resumen_progreso = f"Curso: {curso} ({ea_id}, actividad {act}/{total})"
+                            break
+                    if resumen_progreso != "Sin cursos iniciados.":
+                        break
+            
+            sesiones = _load_history_sessions()
+            if sesiones:
+                ultima_ts = sesiones[-1].get("timestamp", "")
+                try:
+                    import datetime as dt_mod
+                    ultima_dt = dt_mod.datetime.fromisoformat(ultima_ts)
+                    ahora = dt_mod.datetime.now()
+                    dias = (ahora - ultima_dt).days
+                    if dias == 0:
+                        hace = "hoy"
+                    elif dias == 1:
+                        hace = "ayer"
+                    else:
+                        hace = f"hace {dias} días"
+                except:
+                    hace = "desconocido"
+            else:
+                hace = "nunca"
+                
+            sys.stdout.write(f"\n{C['CYAN']}Bienvenido de vuelta, {nombre}.{C['RESET']}\n")
+            sys.stdout.write(f"{C['GRAY']}Sesión anterior: {hace} | {resumen_progreso}{C['RESET']}\n")
+            sys.stdout.write(f"{C['GRAY']}Escribe 'retomar' para continuar donde quedaste, o 'ayuda' para ver comandos.{C['RESET']}\n\n")
         sys.stdout.write(render_art(CHINCO_ART, C['CYAN']) + "\n")
         sys.stdout.write(f"  {C['GRAY']}{'─' * 50}{C['RESET']}\n")
         sys.stdout.write(display_menu("Comandos", [
