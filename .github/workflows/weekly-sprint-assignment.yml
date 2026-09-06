@@ -24,9 +24,20 @@ jobs:
             const REPOS = ['Yap', 'ChincoLinux', '.github'];
             const TEAM = ['VECTORG99', '4mnesia', 'D4n1sb4ld', 'martinkuruzg-hue'];
 
+            // Calculate weekly rotation offset so a different team member starts each week
+            const epoch = new Date('2026-01-05T00:00:00Z').getTime(); // First Monday of 2026
+            const weekOffset = Math.floor((Date.now() - epoch) / (7 * 24 * 60 * 60 * 1000));
+            const startMemberIndex = Math.max(0, weekOffset) % TEAM.length;
+            let assigneeIndex = startMemberIndex;
+
+            console.log(`Weekly rotation start: @${TEAM[startMemberIndex]} (week #${weekOffset})`);
+
             let assigned = 0;
-            let assigneeIndex = 0;
             const report = [];
+            const activeWorkload = {};
+            for (const member of TEAM) {
+              activeWorkload[member] = 0;
+            }
 
             for (const repo of REPOS) {
               console.log(`\n=== ${ORG}/${repo} ===`);
@@ -54,8 +65,17 @@ jobs:
 
                 for (const issue of issues) {
                   if (issue.pull_request) continue;
-                  if (issue.assignees && issue.assignees.length > 0) continue;
                   if (issue.title.startsWith('sprint:')) continue;
+
+                  // Track existing open issues per member
+                  if (issue.assignees && issue.assignees.length > 0) {
+                    for (const a of issue.assignees) {
+                      if (activeWorkload[a.login] !== undefined) {
+                        activeWorkload[a.login]++;
+                      }
+                    }
+                    continue;
+                  }
 
                   const assignee = TEAM[assigneeIndex % TEAM.length];
                   assigneeIndex++;
@@ -69,6 +89,7 @@ jobs:
                     });
                     console.log(`  #${issue.number} "${issue.title.slice(0, 50)}" → @${assignee}`);
                     report.push({ repo, number: issue.number, title: issue.title, assignee });
+                    activeWorkload[assignee]++;
                     assigned++;
                   } catch (e) {
                     console.log(`  Error assigning #${issue.number}: ${e.message}`);
@@ -81,42 +102,44 @@ jobs:
             console.log('  WEEKLY ASSIGNMENT REPORT');
             console.log(`  ${new Date().toISOString()}`);
             console.log('═══════════════════════════════════════════════');
-            console.log(`  Total assigned: ${assigned}`);
+            console.log(`  Starting rotation member: @${TEAM[startMemberIndex]}`);
+            console.log(`  New issues assigned: ${assigned}`);
             console.log(`  Team: ${TEAM.join(', ')}`);
             for (const member of TEAM) {
-              const count = report.filter(r => r.assignee === member).length;
-              console.log(`  @${member}: ${count} issues`);
+              const newCount = report.filter(r => r.assignee === member).length;
+              console.log(`  @${member}: ${newCount} newly assigned (total active: ${activeWorkload[member]})`);
             }
             console.log('═══════════════════════════════════════════════');
 
-            if (assigned > 0) {
-              const reportBody = [
-                `## Weekly Assignment Report — ${new Date().toISOString().split('T')[0]}`,
-                ``,
-                `**Issues assigned:** ${assigned}`,
-                `**Team:** ${TEAM.map(t => '@' + t).join(', ')}`,
-                ``,
+            const reportBody = [
+              `## Weekly Assignment Report — ${new Date().toISOString().split('T')[0]}`,
+              ``,
+              `**Starting rotation member:** @${TEAM[startMemberIndex]}`,
+              `**New issues assigned:** ${assigned}`,
+              `**Team:** ${TEAM.map(t => '@' + t).join(', ')}`,
+              ``,
+              `### New assignments`,
+              assigned > 0 ? [
                 `| Repo | Issue | Asignado a |`,
                 `|------|-------|------------|`,
                 ...report.map(r => `| ${r.repo} | #${r.number} ${r.title.slice(0, 40)} | @${r.assignee} |`),
-                ``,
-                ...TEAM.map(m => `- @${m}: ${report.filter(r => r.assignee === m).length} issues`),
-                ``,
-                `_Auto-generado por weekly-issue-assignment_`,
-              ].join('\n');
+              ].join('\n') : `_No unassigned issues this week._`,
+              ``,
+              `### Active open issues per team member`,
+              ...TEAM.map(m => `- @${m}: ${activeWorkload[m]} issues abiertos`),
+              ``,
+              `_Auto-generado por weekly-issue-assignment_`,
+            ].join('\n');
 
-              try {
-                await github.rest.issues.create({
-                  owner: ORG,
-                  repo: '.github',
-                  title: `sprint: Weekly assignment report — ${new Date().toISOString().split('T')[0]}`,
-                  body: reportBody,
-                  labels: ['sprint-report']
-                });
-                console.log('\nReport issue created in .github');
-              } catch (e) {
-                console.log(`\nCould not create report: ${e.message}`);
-              }
-            } else {
-              console.log('\nNo issues to assign — skipping report');
+            try {
+              await github.rest.issues.create({
+                owner: ORG,
+                repo: '.github',
+                title: `sprint: Weekly assignment report — ${new Date().toISOString().split('T')[0]}`,
+                body: reportBody,
+                labels: ['sprint-report']
+              });
+              console.log('\nReport issue created in .github');
+            } catch (e) {
+              console.log(`\nCould not create report: ${e.message}`);
             }
